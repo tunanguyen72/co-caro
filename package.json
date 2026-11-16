@@ -1,0 +1,9 @@
+{
+  "name": "co-caro",
+  "version": "1.0.0",
+  "description": "Cờ caro 15x15, luật chặn 2 đầu, chơi online / LAN / 1 máy",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=16" },
+  "dependencies": { "ws": "^8.18.0" }
+}

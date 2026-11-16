@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Cờ Caro</title>
+<style>
+  :root {
+    --blue: #4a5c95; --blue-dark: #3b4b7d; --yellow: #f8d84b; --navy: #2d3b58;
+    --red: #c9343c; --grid: #e2e6ee; --hl: #fbe9a6; --bg: #eef1f6;
+    --cell: min(40px, calc((100vw - 24px) / 15));
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--navy);
+         display: flex; justify-content: center; min-height: 100vh; }
+  .app { width: calc(var(--cell) * 15 + 2px); margin: 16px auto; }
+  .card { background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 24px rgba(45,59,88,.15); }
+
+  /* Header giống ảnh mẫu */
+  .header { background: var(--blue); padding: 12px 16px 12px; position: relative; min-height: 84px; }
+  .title { color: #fff; font-size: clamp(24px, 6vw, 34px); font-weight: 800; letter-spacing: .5px; line-height: 1.1; margin: 0; padding-right: 70px; }
+  .header.win .title, .header.accent .title { color: var(--yellow); }
+  .header.lose { background: #6b5a7a; }
+  .subtitle { color: #fff; font-weight: 600; font-size: 14px; margin-top: 6px; opacity: .95; }
+  .coin { position: absolute; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 6px; color: var(--yellow); font-weight: 700; font-size: 15px; }
+  .coin i { width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffe680, #f0b90b 70%); border: 2px solid #e2a400; display: inline-block; }
+  .coin.pop { animation: pop .6s ease; }
+  @keyframes pop { 0% { transform: scale(1) } 40% { transform: scale(1.5) } 100% { transform: scale(1) } }
+
+  /* Thanh người chơi */
+  .players { display: flex; align-items: stretch; border-bottom: 1px solid var(--grid); font-size: 14px; }
+  .pl { flex: 1; display: flex; align-items: center; gap: 8px; padding: 8px 12px; min-width: 0; transition: background .2s; }
+  .pl + .pl { border-left: 1px solid var(--grid); justify-content: flex-end; text-align: right; }
+  .pl.turn { background: #fff7d6; }
+  .pl .nm { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pl .meta { font-size: 11px; color: #7a86a0; }
+  .pl .sc { font-size: 20px; font-weight: 800; }
+  .pl svg { width: 24px; height: 24px; flex: none; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; background: var(--blue); color: #fff; margin-left: 4px; vertical-align: middle; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3cb371; margin-right: 4px; }
+  .dot.off { background: #c4c9d4; }
+
+  /* Bàn cờ */
+  .board { display: grid; grid-template-columns: repeat(15, var(--cell)); grid-template-rows: repeat(15, var(--cell));
+           background: #fff; border-left: 1px solid var(--grid); border-top: 1px solid var(--grid); user-select: none; }
+  .cell { border-right: 1px solid var(--grid); border-bottom: 1px solid var(--grid); display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+  .cell svg { width: 82%; height: 82%; }
+  .cell.can:hover { background: var(--hl); }
+  .cell.win { background: var(--hl); }
+  .cell.last { background: var(--navy); }
+  .cell.last.o { background: var(--red); }
+  .cell.last svg * { stroke: #fff !important; }
+  .cell.placed svg { animation: drop .18s ease-out; }
+  @keyframes drop { from { transform: scale(.3); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+  .x path { stroke: var(--navy); }
+  .o circle { stroke: var(--red); }
+
+  /* Thanh dưới */
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; align-items: center; border-top: 1px solid var(--grid); }
+  .room { font-size: 13px; color: #6b7690; margin-right: auto; }
+  .room b { color: var(--navy); font-size: 16px; letter-spacing: 2px; }
+  button { font: inherit; font-weight: 700; font-size: 14px; border: 0; border-radius: 8px; padding: 9px 14px; cursor: pointer; background: var(--blue); color: #fff; transition: transform .05s, opacity .2s; }
+  button:active { transform: translateY(1px); }
+  button.ghost { background: #e8ecf4; color: var(--navy); }
+  button.warn { background: #e9e0e2; color: var(--red); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* Sảnh */
+  .lobby { padding: 20px 18px 22px; display: grid; gap: 14px; }
+  .lobby label { font-size: 13px; font-weight: 700; color: #6b7690; display: block; margin-bottom: 6px; }
+  .lobby input { width: 100%; font: inherit; font-size: 16px; padding: 10px 12px; border: 2px solid var(--grid); border-radius: 8px; outline: none; color: var(--navy); }
+  .lobby input:focus { border-color: var(--blue); }
+  .lobby .row { display: flex; gap: 8px; }
+  .lobby .row input { text-transform: uppercase; letter-spacing: 3px; font-weight: 700; }
+  .lobby button.big { width: 100%; padding: 13px; font-size: 16px; }
+  .sep { text-align: center; color: #a3acbf; font-size: 12px; font-weight: 700; }
+  .rules { font-size: 13px; color: #6b7690; background: #f6f8fb; border-radius: 8px; padding: 10px 12px; line-height: 1.55; }
+  .note { font-size: 12px; color: var(--red); }
+  .hidden { display: none !important; }
+
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--navy); color: #fff; padding: 10px 16px; border-radius: 8px;
+           font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 10; max-width: 90vw; text-align: center; }
+  .toast.show { opacity: .95; }
+  .conn { font-size: 12px; color: var(--red); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <div class="header accent" id="header">
+      <h1 class="title" id="title">CỜ CARO</h1>
+      <div class="subtitle" id="subtitle">Bàn cờ 15×15 · Luật chặn 2 đầu</div>
+      <div class="coin" id="coin"><i></i><span id="coinText">0</span></div>
+    </div>
+
+    <!-- SẢNH -->
+    <div class="lobby" id="lobby">
+      <div>
+        <label for="name">Tên của bạn</label>
+        <input id="name" maxlength="20" placeholder="Nhập tên...">
+      </div>
+      <button class="big" id="btnLocal">Chơi 2 người trên 1 máy</button>
+      <div class="sep">— CHƠI VỚI BẠN BÈ (ONLINE / CÙNG MẠNG LAN) —</div>
+      <button class="big" id="btnCreate">Tạo phòng mới</button>
+      <div>
+        <label for="code">Hoặc nhập mã phòng</label>
+        <div class="row">
+          <input id="code" maxlength="4" placeholder="ABCD">
+          <button id="btnJoin">Vào phòng</button>
+        </div>
+      </div>
+      <div class="note hidden" id="fileNote">Bạn đang mở file trực tiếp. Hãy chạy server (<b>npm start</b>) rồi mở http://localhost:3000 để chơi online.</div>
+      <div class="rules">
+        <b>Luật chơi:</b> Ai xếp được <b>5 quân liên tiếp</b> (ngang, dọc, chéo) trước sẽ thắng.
+        <b>Chặn 2 đầu:</b> nếu cả hai đầu dãy đều bị quân đối thủ chặn thì <b>không tính thắng</b>.
+        Người đi trước được <b>đổi luân phiên</b> sau mỗi ván.
+      </div>
+    </div>
+
+    <!-- VÁN CỜ -->
+    <div id="gameView" class="hidden">
+      <div class="players">
+        <div class="pl" id="plX"></div>
+        <div class="pl" id="plO"></div>
+      </div>
+      <div class="board" id="board"></div>
+      <div class="bar">
+        <div class="room" id="roomInfo"></div>
+        <button class="ghost" id="btnCopy">Mời bạn</button>
+        <button class="warn" id="btnResign">Đầu hàng</button>
+        <button id="btnNew">Ván mới</button>
+        <button class="ghost" id="btnLeave">Thoát</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="game-logic.js"></script>
+<script>
+const L = CaroLogic;
+const $ = (id) => document.getElementById(id);
+const SVG = {
+  X: '<svg class="x" viewBox="0 0 40 40"><path d="M11 11L29 29M29 11L11 29" stroke-width="5.5" stroke-linecap="round" fill="none"/></svg>',
+  O: '<svg class="o" viewBox="0 0 40 40"><circle cx="20" cy="20" r="11" stroke-width="5" fill="none"/></svg>',
+};
+const COIN_PER_WIN = 9;
+
+let mode = null;        // 'local' | 'online'
+let localGame = null;
+let ws = null, roomCode = null, mySym = null, view = null, connected = false;
+let prevView = null;
+
+// ---------- Tên người chơi ----------
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const sstore = { get(k) { try { return sessionStorage.getItem(k); } catch { return null; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch {} } };
+$('name').value = store.get('caro_name') || '';
+const myName = () => { const n = $('name').value.trim(); store.set('caro_name', n); return n; };
+
+// ---------- Bàn cờ ----------
+const cells = [];
+for (let r = 0; r < L.SIZE; r++) for (let c = 0; c < L.SIZE; c++) {
+  const d = document.createElement('div');
+  d.className = 'cell';
+  d.onclick = () => onCell(r, c);
+  $('board').appendChild(d);
+  cells.push(d);
+}
+
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.tm); toast.tm = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+function canPlay(v) {
+  if (!v || v.status !== 'playing') return false;
+  if (mode === 'local') return true;
+  return v.ready && connected && v.turn === mySym;
+}
+
+function onCell(r, c) {
+  const v = view; if (!canPlay(v) || v.board[r][c]) return;
+  if (mode === 'local') { localGame.play(localGame.turn, r, c); render(localView()); }
+  else send({ t: 'move', r, c });
+}
+
+// ---------- Hiển thị ----------
+function render(v) {
+  const was = prevView; prevView = v; view = v;
+  const win = new Set((v.winLine || []).map(([r, c]) => r * L.SIZE + c));
+  const last = v.lastMove ? v.lastMove[0] * L.SIZE + v.lastMove[1] : -1;
+  const playable = canPlay(v);
+  v.board.forEach((row, r) => row.forEach((p, c) => {
+    const i = r * L.SIZE + c, el = cells[i];
+    const isNew = p && (!was || !was.board[r][c] || was.gameNo !== v.gameNo);
+    el.className = 'cell' + (!p && playable ? ' can' : '') + (win.has(i) ? ' win' : '') + (i === last && !win.has(i) ? ' last' + (p === 'O' ? ' o' : '') : '') + (isNew ? ' placed' : '');
+    const html = p ? SVG[p] : '';
+    if (el.dataset.p !== (p || '')) { el.innerHTML = html; el.dataset.p = p || ''; }
+  }));
+
+  // Người chơi
+  for (const s of ['X', 'O']) {
+    const info = v.players[s];
+    const name = info ? info.name : 'Đang chờ...';
+    const isMe = mode === 'online' && s === mySym;
+    const online = mode === 'local' || (info && info.online);
+    const firstBadge = v.first === s ? '<span class="badge">Đi trước</span>' : '';
+    const meta = `${mode === 'online' ? `<span class="dot ${online ? '' : 'off'}"></span>` : ''}${isMe ? 'Bạn' : (mode === 'online' ? 'Đối thủ' : 'Người chơi ' + s)}${firstBadge}`;
+    const text = `<div style="min-width:0"><div class="nm">${esc(name)}</div><div class="meta">${meta}</div></div>`;
+    const sc = `<div class="sc">${v.scores[s]}</div>`;
+    $('pl' + s).innerHTML = s === 'X' ? SVG.X + text + '<div style="flex:1"></div>' + sc : sc + '<div style="flex:1"></div>' + text + SVG.O;
+    $('pl' + s).classList.toggle('turn', v.status === 'playing' && v.turn === s && (mode === 'local' || v.ready));
+  }
+
+  // Header
+  const h = headerFor(v);
+  $('title').textContent = h.title; $('subtitle').textContent = h.sub;
+  $('header').className = 'header ' + (h.cls || '');
+  const coinOwner = mode === 'online' ? mySym : v.winner;
+  const justWon = v.status === 'over' && v.winner && (mode === 'local' || v.winner === mySym);
+  $('coinText').textContent = justWon ? '+' + COIN_PER_WIN : (coinOwner && coinOwner !== 'spec' ? v.scores[coinOwner] * COIN_PER_WIN : (v.scores.X + v.scores.O) * COIN_PER_WIN);
+  if (justWon && (!was || was.status !== 'over')) { $('coin').classList.remove('pop'); void $('coin').offsetWidth; $('coin').classList.add('pop'); }
+
+  // Nút
+  const isPlayer = mode === 'local' || (mySym === 'X' || mySym === 'O');
+  $('btnNew').disabled = !(isPlayer && v.status === 'over');
+  $('btnResign').disabled = !(isPlayer && v.status === 'playing' && (mode === 'local' || v.ready) && v.moveCount > 0);
+  $('btnCopy').classList.toggle('hidden', mode !== 'online');
+  $('roomInfo').innerHTML = mode === 'online'
+    ? `Phòng <b>${roomCode}</b>${v.spectators ? ` · ${v.spectators} người xem` : ''}${connected ? '' : ' <span class="conn">· Mất kết nối...</span>'}`
+    : `Ván <b>${v.gameNo}</b> · Hòa ${v.scores.draw}`;
+}
+
+function headerFor(v) {
+  const reason = v.endReason === 'resign' ? ' (đối thủ đầu hàng)' : '';
+  const nameOf = (s) => (v.players[s] ? v.players[s].name : s);
+  if (mode === 'local') {
+    if (v.status === 'over') return v.winner
+      ? { title: 'CHIẾN THẮNG!', sub: `${nameOf(v.winner)} (${v.winner}) đã chiến thắng trò chơi.${v.endReason === 'resign' ? ' (Đối thủ đầu hàng)' : ''}`, cls: 'win' }
+      : { title: 'HÒA!', sub: 'Bàn cờ đã kín, không ai thắng.', cls: 'accent' };
+    return { title: `LƯỢT CỦA ${v.turn}`, sub: `Ván ${v.gameNo} · ${v.first} đi trước · Luật chặn 2 đầu` };
+  }
+  if (!v.ready) return { title: 'ĐANG CHỜ BẠN BÈ...', sub: `Gửi mã phòng ${roomCode} hoặc bấm "Mời bạn" để copy link.` };
+  if (mySym === 'spec') {
+    if (v.status === 'over') return v.winner ? { title: `${v.winner} CHIẾN THẮNG!`, sub: `${nameOf(v.winner)} đã chiến thắng trò chơi.`, cls: 'win' } : { title: 'HÒA!', sub: 'Bàn cờ đã kín.', cls: 'accent' };
+    return { title: 'ĐANG XEM', sub: `Lượt của ${nameOf(v.turn)} (${v.turn})` };
+  }
+  if (v.status === 'over') {
+    if (!v.winner) return { title: 'HÒA!', sub: 'Bàn cờ đã kín, không ai thắng.', cls: 'accent' };
+    if (v.winner === mySym) return { title: 'CHIẾN THẮNG!', sub: 'Bạn đã chiến thắng trò chơi.' + reason, cls: 'win' };
+    return { title: 'THUA CUỘC', sub: v.endReason === 'resign' ? 'Bạn đã đầu hàng ván này.' : `${nameOf(v.winner)} đã thắng ván này.`, cls: 'lose' };
+  }
+  const opp = L.other(mySym);
+  if (!v.players[opp] || !v.players[opp].online) return { title: 'ĐỐI THỦ MẤT KẾT NỐI', sub: 'Đang chờ đối thủ quay lại...' };
+  return v.turn === mySym
+    ? { title: 'LƯỢT CỦA BẠN', sub: `Bạn cầm ${mySym} · Ván ${v.gameNo}, ${v.first === mySym ? 'bạn' : 'đối thủ'} đi trước`, cls: 'accent' }
+    : { title: 'ĐỐI THỦ ĐANG ĐI', sub: `${nameOf(opp)} đang suy nghĩ...` };
+}
+const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+function showGame(on) {
+  $('lobby').classList.toggle('hidden', on);
+  $('gameView').classList.toggle('hidden', !on);
+  if (!on) { $('header').className = 'header accent'; $('title').textContent = 'CỜ CARO'; $('subtitle').textContent = 'Bàn cờ 15×15 · Luật chặn 2 đầu'; $('coinText').textContent = '0'; }
+}
+
+// ---------- Chơi 1 máy ----------
+function localView() {
+  const n = myName();
+  return { ...localGame.toJSON(), players: { X: { name: n || 'Người chơi 1' }, O: { name: 'Người chơi 2' } }, ready: true };
+}
+$('btnLocal').onclick = () => { mode = 'local'; localGame = new L.Game(); prevView = null; showGame(true); render(localView()); };
+
+// ---------- Online ----------
+const isFile = location.protocol === 'file:';
+if (isFile) { $('fileNote').classList.remove('hidden'); $('btnCreate').disabled = $('btnJoin').disabled = true; }
+
+let pending = null, reconnectTm = null;
+function connect() {
+  if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+  ws.onopen = () => {
+    connected = true;
+    if (pending) { ws.send(JSON.stringify(pending)); pending = null; }
+    else if (mode === 'online' && roomCode) ws.send(JSON.stringify({ t: 'join', room: roomCode, name: myName(), token: sstore.get('caro_tok_' + roomCode) }));
+    if (view && mode === 'online') render(view);
+  };
+  ws.onmessage = (e) => handle(JSON.parse(e.data));
+  ws.onclose = () => {
+    connected = false;
+    if (mode === 'online') { if (view) render(view); clearTimeout(reconnectTm); reconnectTm = setTimeout(connect, 1500); }
+  };
+}
+function send(msg) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  else { pending = msg; connect(); }
+}
+function handle(m) {
+  if (m.t === 'joined') {
+    mode = 'online'; roomCode = m.room; mySym = m.you; prevView = null;
+    if (m.token) sstore.set('caro_tok_' + m.room, m.token);
+    history.replaceState(null, '', '?room=' + m.room);
+    showGame(true);
+    if (m.you === 'spec') toast('Phòng đã đủ 2 người, bạn đang xem trận đấu');
+  } else if (m.t === 'state') { if (mode === 'online') render(m); }
+  else if (m.t === 'error') toast(m.msg);
+  else if (m.t === 'info') toast(m.msg);
+  else if (m.t === 'kicked') { mode = null; toast('Bạn đã vào phòng này ở tab khác'); showGame(false); }
+}
+
+$('btnCreate').onclick = () => send({ t: 'create', name: myName() });
+$('btnJoin').onclick = () => {
+  const code = $('code').value.trim().toUpperCase();
+  if (code.length !== 4) return toast('Mã phòng gồm 4 ký tự');
+  send({ t: 'join', room: code, name: myName(), token: sstore.get('caro_tok_' + code) });
+};
+$('code').onkeydown = (e) => { if (e.key === 'Enter') $('btnJoin').click(); };
+
+// ---------- Nút trong ván ----------
+$('btnNew').onclick = () => {
+  if (mode === 'local') { localGame.newGame(); render(localView()); toast(`Ván ${localGame.gameNo}: ${localGame.first} đi trước`); }
+  else send({ t: 'newGame' });
+};
+$('btnResign').onclick = () => {
+  if (!confirmResign()) return;
+  if (mode === 'local') { localGame.resign(localGame.turn); render(localView()); }
+  else send({ t: 'resign' });
+};
+function confirmResign() {
+  // Bấm 2 lần trong 3 giây để xác nhận (tránh bấm nhầm)
+  const b = $('btnResign');
+  if (b.dataset.armed) { delete b.dataset.armed; b.textContent = 'Đầu hàng'; return true; }
+  b.dataset.armed = 1; b.textContent = 'Chắc chưa?';
+  setTimeout(() => { delete b.dataset.armed; b.textContent = 'Đầu hàng'; }, 3000);
+  return false;
+}
+$('btnLeave').onclick = () => {
+  if (mode === 'online') { send({ t: 'leave' }); history.replaceState(null, '', location.pathname); }
+  mode = null; roomCode = null; mySym = null; view = null; showGame(false);
+};
+$('btnCopy').onclick = async () => {
+  const link = `${location.origin}${location.pathname}?room=${roomCode}`;
+  try { await navigator.clipboard.writeText(link); toast('Đã copy link mời: ' + link); }
+  catch { prompt('Gửi link này cho bạn bè:', link); }
+};
+
+// Mở link mời ?room=ABCD → tự vào phòng
+const qRoom = new URLSearchParams(location.search).get('room');
+if (qRoom && !isFile) {
+  $('code').value = qRoom.toUpperCase();
+  if (myName()) $('btnJoin').click();                       // đã có tên → vào thẳng
+  else { $('name').focus(); toast('Nhập tên rồi bấm "Vào phòng" nhé!'); }
+}
+</script>
+</body>
+</html>
