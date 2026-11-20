@@ -5,7 +5,8 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
-const { Game } = require('./game-logic.js');
+const { Game, TURN_MS: DEFAULT_TURN_MS } = require('./game-logic.js');
+const TURN_MS = Number(process.env.TURN_MS) || DEFAULT_TURN_MS;
 
 const PORT = process.env.PORT || 3000;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
@@ -35,6 +36,28 @@ function newCode() {
 const cleanName = (n, fb) => (String(n || '').trim().slice(0, 20) || fb);
 const send = (ws, msg) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); };
 
+// ---------- Đồng hồ 30s mỗi lượt (server quyết định) ----------
+// Đồng hồ chỉ chạy khi ván đang diễn ra và CẢ 2 người chơi đều đang kết nối.
+// Hết giờ → server đánh hộ 1 nước ngẫu nhiên cho người đang tới lượt.
+function syncTimer(room) {
+  const g = room.game;
+  const online = ['X', 'O'].every((s) => room.players[s] && room.players[s].ws);
+  const run = g.status === 'playing' && online;
+  const key = run ? `${g.gameNo}:${g.moveCount}` : null;
+  if (key === room.timerKey) return;
+  clearTimeout(room.timer);
+  room.timerKey = key;
+  room.deadline = null;
+  if (!run) return;
+  room.deadline = Date.now() + TURN_MS;
+  room.timer = setTimeout(() => {
+    if (room.timerKey !== key || !rooms.has(room.code)) return;
+    const sym = g.turn;
+    const name = room.players[sym] ? room.players[sym].name : sym;
+    if (g.autoPlay()) broadcast(room, { t: 'info', msg: `Hết giờ! Đã đánh ngẫu nhiên thay ${name}` });
+  }, TURN_MS + 150);
+}
+
 function roomState(room) {
   const pl = (s) => room.players[s] ? { name: room.players[s].name, online: !!room.players[s].ws } : null;
   return {
@@ -42,10 +65,17 @@ function roomState(room) {
     players: { X: pl('X'), O: pl('O') },
     spectators: room.spectators.size,
     ready: !!(room.players.X && room.players.O),
+    turnMs: TURN_MS,
+    timeLeft: room.deadline ? Math.max(0, room.deadline - Date.now()) : null,
     ...room.game.toJSON(),
   };
 }
+function sendAll(room, msg) {
+  for (const s of ['X', 'O']) if (room.players[s]) send(room.players[s].ws, msg);
+  for (const ws of room.spectators) send(ws, msg);
+}
 function broadcast(room, extra) {
+  syncTimer(room);
   const st = roomState(room);
   for (const s of ['X', 'O']) if (room.players[s]) send(room.players[s].ws, st);
   for (const ws of room.spectators) send(ws, st);
@@ -70,7 +100,7 @@ function detach(ws, explicit) {
 }
 
 function attach(ws, room, sym, name, token) {
-  ws.info = { room: room.code, sym };
+  ws.info = { room: room.code, sym, name };
   if (sym === 'spec') room.spectators.add(ws);
   else {
     const old = room.players[sym] && room.players[sym].ws;
@@ -78,6 +108,7 @@ function attach(ws, room, sym, name, token) {
     room.players[sym] = { name, token, ws };
   }
   send(ws, { t: 'joined', room: room.code, you: sym, token });
+  send(ws, { t: 'chatHistory', list: room.chat });
   broadcast(room, sym === 'spec' ? null : { t: 'info', msg: `${name} đã vào phòng (${sym})` });
 }
 
@@ -93,7 +124,7 @@ wss.on('connection', (ws) => {
 
     if (m.t === 'create') {
       detach(ws, true);
-      const room = { code: newCode(), players: { X: null, O: null }, spectators: new Set(), game: new Game(), lastActive: Date.now() };
+      const room = { code: newCode(), players: { X: null, O: null }, spectators: new Set(), game: new Game(), chat: [], lastActive: Date.now() };
       rooms.set(room.code, room);
       return attach(ws, room, 'X', cleanName(m.name, 'Người chơi 1'), crypto.randomUUID());
     }
@@ -116,6 +147,17 @@ wss.on('connection', (ws) => {
     const room = rooms.get(info.room); if (!room) return err('Phòng không còn tồn tại');
     room.lastActive = Date.now();
     if (m.t === 'leave') return detach(ws, true);
+    if (m.t === 'chat') {
+      const text = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      if (!text) return;
+      const now = Date.now();
+      if (ws.lastChat && now - ws.lastChat < 400) return err('Bạn gửi tin nhắn hơi nhanh');
+      ws.lastChat = now;
+      const name = info.sym === 'spec' ? info.name : (room.players[info.sym] ? room.players[info.sym].name : info.name);
+      const msg = { sym: info.sym, name, text, ts: now };
+      room.chat.push(msg); if (room.chat.length > 50) room.chat.shift();
+      return sendAll(room, { t: 'chat', msg });
+    }
     if (info.sym === 'spec') return err('Bạn đang xem, không thể thao tác');
     const ready = room.players.X && room.players.O;
 
@@ -146,7 +188,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms) {
     const anyone = ['X', 'O'].some((s) => room.players[s] && room.players[s].ws) || room.spectators.size;
-    if (!anyone && now - room.lastActive > 30 * 60 * 1000) rooms.delete(code);
+    if (!anyone && now - room.lastActive > 30 * 60 * 1000) { clearTimeout(room.timer); rooms.delete(code); }
   }
 }, 30000);
 

@@ -6,6 +6,7 @@
   const SIZE = 15;           // Bàn cờ 15x15
   const WIN = 5;             // 5 quân liên tiếp
   const EDGE_BLOCKS = false; // true = mép bàn cờ cũng tính là "bị chặn"
+  const TURN_MS = 30000;     // 30 giây mỗi lượt
 
   const other = (s) => (s === 'X' ? 'O' : 'X');
   const inside = (r, c) => r >= 0 && r < SIZE && c >= 0 && c < SIZE;
@@ -31,6 +32,25 @@
     return null;
   }
 
+  // Nước đi ngẫu nhiên khi hết giờ: chọn ngẫu nhiên 1 ô trống sát các quân đã có
+  // (để nước đi không rơi quá xa bàn cờ). Bàn trống thì đánh ô giữa.
+  function randomMove(board) {
+    const near = [], empty = [];
+    for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
+      if (board[r][c]) continue;
+      empty.push([r, c]);
+      let adj = false;
+      for (let dr = -1; dr <= 1 && !adj; dr++) for (let dc = -1; dc <= 1; dc++) {
+        if ((dr || dc) && inside(r + dr, c + dc) && board[r + dr][c + dc]) { adj = true; break; }
+      }
+      if (adj) near.push([r, c]);
+    }
+    const pool = near.length ? near : empty;
+    if (!pool.length) return null;
+    if (!near.length && !board[7][7]) return [7, 7];
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
   class Game {
     constructor() {
       this.scores = { X: 0, O: 0, draw: 0 };
@@ -50,14 +70,16 @@
       this.lastMove = null;
       this.moveCount = 0;
       this.endReason = null;
+      this.lastAuto = false;
     }
-    play(sym, r, c) {
+    play(sym, r, c, auto = false) {
       if (this.status !== 'playing') return 'Ván đã kết thúc';
       if (sym !== this.turn) return 'Chưa đến lượt bạn';
       if (!Number.isInteger(r) || !Number.isInteger(c) || !inside(r, c)) return 'Nước đi không hợp lệ';
       if (this.board[r][c]) return 'Ô này đã có quân';
       this.board[r][c] = sym;
       this.lastMove = [r, c];
+      this.lastAuto = !!auto;
       this.moveCount++;
       const line = checkWin(this.board, r, c);
       if (line) {
@@ -76,11 +98,19 @@
       this.scores[this.winner]++; this.endReason = 'resign';
       return null;
     }
+    // Hết giờ: đánh hộ người đang tới lượt 1 nước ngẫu nhiên
+    autoPlay() {
+      if (this.status !== 'playing') return null;
+      const mv = randomMove(this.board);
+      if (!mv) return null;
+      this.play(this.turn, mv[0], mv[1], true);
+      return mv;
+    }
     toJSON() {
-      const { board, turn, first, status, winner, winLine, lastMove, moveCount, scores, gameNo, endReason } = this;
-      return { board, turn, first, status, winner, winLine, lastMove, moveCount, scores, gameNo, endReason };
+      const { board, turn, first, status, winner, winLine, lastMove, lastAuto, moveCount, scores, gameNo, endReason } = this;
+      return { board, turn, first, status, winner, winLine, lastMove, lastAuto, moveCount, scores, gameNo, endReason };
     }
   }
 
-  return { SIZE, WIN, EDGE_BLOCKS, other, inside, createBoard, checkWin, Game };
+  return { SIZE, WIN, EDGE_BLOCKS, TURN_MS, other, inside, createBoard, checkWin, randomMove, Game };
 });

@@ -82,6 +82,31 @@
            font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 10; max-width: 90vw; text-align: center; }
   .toast.show { opacity: .95; }
   .conn { font-size: 12px; color: var(--red); font-weight: 700; }
+
+  /* Đồng hồ đếm ngược */
+  .timer { height: 5px; background: var(--grid); }
+  .timer div { height: 100%; width: 0; background: var(--navy); transition: width .2s linear; }
+  .timer div.o { background: var(--red); }
+  .timer div.low { background: #e8572a; animation: blink .8s infinite; }
+  @keyframes blink { 50% { opacity: .45 } }
+  .clock { display: inline-block; margin-left: 6px; font-weight: 800; font-size: 12px; color: var(--navy); font-variant-numeric: tabular-nums; }
+  .clock.low { color: #e8572a; }
+
+  /* Chat */
+  .chat { border-top: 1px solid var(--grid); padding: 10px 12px 12px; }
+  .chat-head { font-size: 12px; font-weight: 700; color: #6b7690; margin-bottom: 6px; }
+  .chat-list { height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #f6f8fb; border-radius: 8px; }
+  .msg { max-width: 82%; align-self: flex-start; background: #fff; border: 1px solid var(--grid); border-radius: 10px 10px 10px 2px; padding: 5px 9px; font-size: 14px; line-height: 1.35; word-wrap: break-word; }
+  .msg.me { align-self: flex-end; background: var(--blue); color: #fff; border-color: var(--blue); border-radius: 10px 10px 2px 10px; }
+  .msg .who { display: block; font-size: 11px; font-weight: 700; margin-bottom: 1px; }
+  .msg .who.X { color: var(--navy); } .msg .who.O { color: var(--red); } .msg .who.spec { color: #7a86a0; }
+  .msg.me .who { display: none; }
+  .msg .tm { font-size: 10px; opacity: .6; margin-left: 6px; }
+  .chat-form { display: flex; gap: 6px; margin-top: 8px; }
+  .chat-form input { flex: 1; min-width: 0; font: inherit; font-size: 15px; padding: 9px 11px; border: 2px solid var(--grid); border-radius: 8px; outline: none; color: var(--navy); }
+  .chat-form input:focus { border-color: var(--blue); }
+  .quick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .quick button { padding: 4px 10px; font-size: 12px; font-weight: 600; background: #e8ecf4; color: var(--navy); border-radius: 14px; }
 </style>
 </head>
 <body>
@@ -123,6 +148,7 @@
         <div class="pl" id="plX"></div>
         <div class="pl" id="plO"></div>
       </div>
+      <div class="timer"><div id="timerFill"></div></div>
       <div class="board" id="board"></div>
       <div class="bar">
         <div class="room" id="roomInfo"></div>
@@ -130,6 +156,15 @@
         <button class="warn" id="btnResign">Đầu hàng</button>
         <button id="btnNew">Ván mới</button>
         <button class="ghost" id="btnLeave">Thoát</button>
+      </div>
+      <div class="chat hidden" id="chatBox">
+        <div class="chat-head">Trò chuyện trong phòng</div>
+        <div class="chat-list" id="chatList"></div>
+        <form class="chat-form" id="chatForm">
+          <input id="chatInput" maxlength="200" placeholder="Nhắn tin..." autocomplete="off">
+          <button type="submit">Gửi</button>
+        </form>
+        <div class="quick" id="quick"></div>
       </div>
     </div>
   </div>
@@ -206,7 +241,7 @@ function render(v) {
     const online = mode === 'local' || (info && info.online);
     const firstBadge = v.first === s ? '<span class="badge">Đi trước</span>' : '';
     const meta = `${mode === 'online' ? `<span class="dot ${online ? '' : 'off'}"></span>` : ''}${isMe ? 'Bạn' : (mode === 'online' ? 'Đối thủ' : 'Người chơi ' + s)}${firstBadge}`;
-    const text = `<div style="min-width:0"><div class="nm">${esc(name)}</div><div class="meta">${meta}</div></div>`;
+    const text = `<div style="min-width:0"><div class="nm">${esc(name)}<span class="clock" id="clock${s}"></span></div><div class="meta">${meta}</div></div>`;
     const sc = `<div class="sc">${v.scores[s]}</div>`;
     $('pl' + s).innerHTML = s === 'X' ? SVG.X + text + '<div style="flex:1"></div>' + sc : sc + '<div style="flex:1"></div>' + text + SVG.O;
     $('pl' + s).classList.toggle('turn', v.status === 'playing' && v.turn === s && (mode === 'local' || v.ready));
@@ -229,7 +264,71 @@ function render(v) {
   $('roomInfo').innerHTML = mode === 'online'
     ? `Phòng <b>${roomCode}</b>${v.spectators ? ` · ${v.spectators} người xem` : ''}${connected ? '' : ' <span class="conn">· Mất kết nối...</span>'}`
     : `Ván <b>${v.gameNo}</b> · Hòa ${v.scores.draw}`;
+  $('chatBox').classList.toggle('hidden', mode !== 'online');
+
+  // Đồng hồ: online lấy thời gian còn lại từ server, chơi 1 máy thì tự đếm
+  if (mode === 'online') setDeadline(v.status === 'playing' && v.timeLeft != null ? v.timeLeft : null, v.turn, v.turnMs);
+  else {
+    const key = v.status === 'playing' ? v.gameNo + ':' + v.moveCount : null;
+    if (key !== localKey) { localKey = key; setDeadline(key ? L.TURN_MS : null, v.turn, L.TURN_MS); }
+  }
+  tick();
 }
+
+// ---------- Đồng hồ 30s ----------
+let deadline = null, timerSym = null, turnTotal = L.TURN_MS, localKey = null;
+function setDeadline(ms, sym, total) {
+  deadline = ms == null ? null : performance.now() + ms;
+  timerSym = sym; turnTotal = total || L.TURN_MS;
+}
+function tick() {
+  const left = deadline == null ? null : Math.max(0, deadline - performance.now());
+  const low = left != null && left < 10000;
+  for (const s of ['X', 'O']) {
+    const el = $('clock' + s); if (!el) continue;
+    el.textContent = left != null && s === timerSym ? Math.ceil(left / 1000) + 's' : '';
+    el.classList.toggle('low', low);
+  }
+  const bar = $('timerFill');
+  bar.style.width = left == null ? '0%' : (100 * left / turnTotal).toFixed(1) + '%';
+  bar.className = (timerSym === 'O' ? 'o' : '') + (low ? ' low' : '');
+  // Chơi 1 máy: hết giờ thì đánh ngẫu nhiên thay người đang tới lượt
+  if (mode === 'local' && left === 0 && localGame && localGame.status === 'playing') {
+    deadline = null;
+    const sym = localGame.turn;
+    if (localGame.autoPlay()) { toast(`Hết giờ! Đã đánh ngẫu nhiên thay ${sym}`); render(localView()); }
+  }
+}
+setInterval(tick, 200);
+
+// ---------- Chat ----------
+let chatMsgs = [];
+const QUICK = ['Xin chào!', 'Đánh hay quá!', 'Nhanh lên nào', 'Ván nữa nhé?', 'GG'];
+function renderChat() {
+  const list = $('chatList');
+  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  list.innerHTML = chatMsgs.length ? '' : '<div class="muted">Chưa có tin nhắn nào. Chào đối thủ một câu nhé!</div>';
+  for (const m of chatMsgs) {
+    const d = document.createElement('div');
+    const mine = m.sym === mySym && mySym !== 'spec';
+    d.className = 'msg' + (mine ? ' me' : '');
+    const who = document.createElement('span'); who.className = 'who ' + m.sym;
+    who.textContent = m.name + (m.sym === 'spec' ? ' (xem)' : ` (${m.sym})`);
+    const txt = document.createElement('span'); txt.textContent = m.text;
+    const tm = document.createElement('span'); tm.className = 'tm';
+    const dt = new Date(m.ts); tm.textContent = String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+    d.append(who, txt, tm); list.appendChild(d);
+  }
+  if (atBottom || chatMsgs.length && chatMsgs[chatMsgs.length - 1].sym === mySym) list.scrollTop = list.scrollHeight;
+}
+function sendChat(text) {
+  text = String(text || '').trim();
+  if (!text || mode !== 'online') return;
+  send({ t: 'chat', text });
+}
+$('chatForm').onsubmit = (e) => { e.preventDefault(); sendChat($('chatInput').value); $('chatInput').value = ''; };
+for (const q of QUICK) { const b = document.createElement('button'); b.type = 'button'; b.textContent = q; b.onclick = () => sendChat(q); $('quick').appendChild(b); }
+renderChat();
 
 function headerFor(v) {
   const reason = v.endReason === 'resign' ? ' (đối thủ đầu hàng)' : '';
@@ -303,6 +402,15 @@ function handle(m) {
     showGame(true);
     if (m.you === 'spec') toast('Phòng đã đủ 2 người, bạn đang xem trận đấu');
   } else if (m.t === 'state') { if (mode === 'online') render(m); }
+  else if (m.t === 'chatHistory') { chatMsgs = m.list || []; renderChat(); $('chatList').scrollTop = 1e9; }
+  else if (m.t === 'chat') {
+    chatMsgs.push(m.msg); if (chatMsgs.length > 50) chatMsgs.shift(); renderChat();
+    if (m.msg.sym !== mySym) {
+      const r = $('chatBox').getBoundingClientRect();
+      if (r.top > innerHeight || r.bottom < 0) toast(`${m.msg.name}: ${m.msg.text}`);   // khung chat đang khuất → hiện nhanh
+      if (document.hidden) document.title = '● Tin nhắn mới – Cờ Caro';
+    }
+  }
   else if (m.t === 'error') toast(m.msg);
   else if (m.t === 'info') toast(m.msg);
   else if (m.t === 'kicked') { mode = null; toast('Bạn đã vào phòng này ở tab khác'); showGame(false); }
@@ -345,6 +453,7 @@ $('btnCopy').onclick = async () => {
 };
 
 // Mở link mời ?room=ABCD → tự vào phòng
+document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Cờ Caro'; });
 const qRoom = new URLSearchParams(location.search).get('room');
 if (qRoom && !isFile) {
   $('code').value = qRoom.toUpperCase();
